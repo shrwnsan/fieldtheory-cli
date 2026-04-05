@@ -12,6 +12,7 @@
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| v1.1 | 2026-04-05 | Claude Code (glm-5-turbo) | Secondary review; added findings #19–22, refined #16–17, added cross-review comparison |
 | v1.0 | 2026-04-05 | Pi agent (glm-5-turbo) | Initial review (findings #1–18) |
 
 ---
@@ -26,6 +27,7 @@ Field Theory CLI is a well-structured, local-first tool for syncing X/Twitter bo
 | 🟡 Medium | 5 |
 | 🟢 Low / Info | 7 |
 | ✅ Secure | 3 |
+| 📝 Addendum (v1.1) | 4 |
 
 ---
 
@@ -174,6 +176,8 @@ Error messages include full filesystem paths, leaking directory structure on sha
 
 All SQLite queries use parameterized bindings (`?` placeholders). FTS5 MATCH queries receive user input via bound parameters. **No SQL injection found.**
 
+**v1.1 note:** While SQL injection is correctly prevented, FTS5 `MATCH` syntax is a secondary concern — see addendum #19.
+
 ### 17. PKCE Implementation is Correct
 
 **File:** `src/xauth.ts` (lines 11–20)
@@ -193,6 +197,8 @@ All SQLite queries use parameterized bindings (`?` placeholders). FTS5 MATCH que
 - Categories filtered to non-empty strings, lowercased ✅
 - Primary category validated ✅
 
+**v1.1 note:** Output validation is strong, but the `execFileSync` call to `claude`/`codex` itself is a broader trust surface — see addendum #20.
+
 ---
 
 ## Priority Fixes
@@ -207,3 +213,100 @@ All SQLite queries use parameterized bindings (`?` placeholders). FTS5 MATCH que
 | P1 | Add timeout to OAuth callback server | ~5 lines |
 | P2 | Remove CWD from env file search paths | ~2 lines |
 | P2 | Strengthen prompt injection regexes or document output-validation reliance | ~10 lines |
+
+---
+
+## 📝 ADDENDUM — v1.1 Secondary Review
+
+**Date:** 2026-04-05
+**Reviewer:** Claude Code (glm-5-turbo)
+**Methodology:** Independent full-source review, then delta analysis against v1.0 findings.
+
+The primary review is thorough and accurate. Four supplementary findings below — two refinements to existing findings and two new items.
+
+### 19. FTS5 Query Syntax Abuse (refinement of #16)
+
+**File:** `src/bookmarks-db.ts` (lines 121, 336)
+
+Finding #16 correctly states no SQL injection exists. However, the `MATCH` clause accepts FTS5 query syntax directly from user input. FTS5 supports `AND`, `OR`, `NOT`, `NEAR`, column filters (`text:foo`), and phrase queries. A crafted search term like `NOT *` or deeply nested `NEAR` expressions could cause expensive full-table scans. Since sql.js is in-process and single-user, the blast radius is limited to local CPU/memory — but a `NEAR(a, b, c, d, e, ...)` with hundreds of terms could spike memory.
+
+**Severity:** Low (local-only, in-process SQLite). Original #16 classification as "Secure" is reasonable for SQL injection specifically; this is a distinct FTS5-syntax concern.
+
+**Recommendation:** Consider input length limits on FTS5 queries, or document that FTS5 syntax is exposed to the user (which may be intentional for power users).
+
+### 20. `execFileSync` to External LLM CLIs — Trust Boundary (refinement of #18)
+
+**File:** `src/bookmark-classify-llm.ts` (lines 44–56)
+
+```typescript
+function invokeEngine(engine: Engine, prompt: string): string {
+  return execFileSync(bin, args, {
+    encoding: 'utf-8',
+    timeout: 120_000,
+    maxBuffer: 1024 * 1024,
+    stdio: ['pipe', 'pipe', 'ignore'],
+  }).trim();
+}
+```
+
+The tool shells out to `claude -p` or `codex exec` with a prompt built from untrusted tweet text. While finding #5 addresses prompt injection in the *text*, and #18 confirms output validation is solid, the `execFileSync` call itself creates a trust dependency on whatever `claude` or `codex` binary is first in `$PATH`. If a malicious actor places a `claude` or `codex` binary earlier in PATH, it receives the full prompt including bookmark data.
+
+**Severity:** Low — requires PATH manipulation, which is a pre-compromise scenario on most systems.
+
+**Recommendation:** Resolve binary paths with `which`/`where` and validate against known install locations, or document the PATH dependency.
+
+### 21. LIKE Pattern Injection in Category/Domain Filters
+
+**File:** `src/bookmarks-db.ts` (lines 137–143)
+
+```typescript
+conditions.push(`b.categories LIKE ?`);
+params.push(`%${filters.category}%`);
+```
+
+User-supplied `--category` and `--domain` values are wrapped in `%` wildcards but not escaped for LIKE metacharacters. A value containing `%` or `_` would be interpreted as wildcards. For example, `--category "%tool%"` would match any category containing "tool", while `--category "_"` would match any single-character category.
+
+**Severity:** Low — local-only, read operation, no data modification. Affects query accuracy, not security.
+
+**Recommendation:** Escape `%` and `_` in user-supplied LIKE values, or use FTS5/GLOB for pattern matching.
+
+### 22. CLI Options Enable Path Traversal to Arbitrary Directories
+
+**File:** `src/cli.ts` (lines 236–237), `src/graphql-bookmarks.ts` (lines 33–36)
+
+Options `--chrome-user-data-dir` and `--chrome-profile-directory` accept arbitrary paths with no validation. Combined with finding #7 (CWD env loading), a social engineering vector exists: convince a user to run `ft sync --chrome-user-data-dir /path/to/sensitive/app` from a directory containing a malicious `.env.local`. The tool would attempt to read cookies from the specified application's data directory.
+
+**Severity:** Medium — requires user to be tricked into passing a specific CLI flag, but the tool does nothing to warn about unusual paths or validate the target looks like a Chrome profile directory.
+
+**Recommendation:** Validate that the target path contains a `Cookies` file and looks like a Chrome profile before attempting extraction. Warn if the path is outside known Chrome locations.
+
+---
+
+## Cross-Review Comparison
+
+| # | Finding | Primary (v1.0) | Secondary (v1.1) | Notes |
+|---|---------|---------------|-------------------|-------|
+| 1 | Chrome cookie extraction | 🔴 | — | Agreed; Pi provided more detail on consent gap |
+| 2 | Cookies in CLI args | 🔴 | Missed | Pi caught this; valid concern |
+| 3 | World-readable data files | 🔴 | — | Agreed |
+| 4 | Media SSRF | 🟡 | — | Agreed |
+| 5 | Prompt injection fragility | 🟡 | — | Agreed; output validation compensates |
+| 6 | OAuth callback timeout | 🟡 | Missed | Pi caught this; valid |
+| 7 | CWD env loading | 🟡 | — | Agreed |
+| 8 | Hardcoded bearer | 🟡 | — | Agreed |
+| 9 | UA spoofing | 🟢 | Missed | Pi caught this |
+| 10 | No integrity checks | 🟢 | — | Agreed |
+| 11 | GraphQL query ID | 🟢 | — | Agreed |
+| 12 | Plaintext PII | 🟢 | — | Agreed (by design) |
+| 13 | No secure delete | 🟢 | Missed | Pi caught this |
+| 14 | Path leak in errors | 🟢 | — | Agreed |
+| 15 | Dependency supply chain | 🟢 | — | Agreed; `npm audit` clean |
+| 16 | SQL injection defended | ✅ | Refined | FTS5 syntax abuse is a secondary concern (see #19) |
+| 17 | PKCE correct | ✅ | — | Agreed |
+| 18 | LLM output validation | ✅ | Refined | `execFileSync` PATH trust is a secondary concern (see #20) |
+| — | LIKE injection | — | 🟢 New | #21 |
+| — | CLI path traversal | — | 🟡 New | #22 |
+| — | FTS5 syntax abuse | — | 🟢 New | #19 (refines #16) |
+| — | execFileSync PATH | — | 🟢 New | #20 (refines #18) |
+
+**Conclusion:** The primary review is comprehensive and well-calibrated. All 18 original findings are confirmed. Four supplementary items added: two refine existing "Secure" findings into nuanced assessments, and two identify previously unreported gaps (LIKE injection, CLI path traversal). No findings were disputed or found to be incorrect.
