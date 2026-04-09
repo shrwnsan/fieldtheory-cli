@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, unlinkSync, copyFileSync, readFileSync } from 'node:fs';
+import { existsSync, unlinkSync, copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, win32 as winPath } from 'node:path';
 import { tmpdir, platform } from 'node:os';
 import { pbkdf2Sync, createDecipheriv, randomUUID } from 'node:crypto';
@@ -360,7 +360,7 @@ function queryDbVersion(dbPath: string): number {
   } catch {
     const tmpDb = join(tmpdir(), `ft-meta-${randomUUID()}.db`);
     try {
-      copyFileSync(dbPath, tmpDb);
+      writeFileSync(tmpDb, readFileSync(dbPath), { mode: 0o600 });
       return parseInt(tryQuery(tmpDb), 10) || 0;
     } catch {
       return 0;
@@ -404,7 +404,7 @@ function queryCookies(dbPath: string, domain: string, names: string[], browser: 
   } catch {
     const tmpDb = join(tmpdir(), `ft-cookies-${randomUUID()}.db`);
     try {
-      copyFileSync(dbPath, tmpDb);
+      writeFileSync(tmpDb, readFileSync(dbPath), { mode: 0o600 });
       output = tryQuery(tmpDb);
     } catch (e2: any) {
       throw new Error(

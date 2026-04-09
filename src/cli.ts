@@ -5,6 +5,7 @@ import { getBookmarkStatusView, formatBookmarkStatus } from './bookmarks-service
 import { runTwitterOAuthFlow } from './xauth.js';
 import { syncBookmarksGraphQL, syncGaps } from './graphql-bookmarks.js';
 import type { SyncProgress, GapFillProgress } from './graphql-bookmarks.js';
+import { loadChromeSessionConfig } from './config.js';
 import { fetchBookmarkMediaBatch } from './bookmark-media.js';
 import {
   buildIndex,
@@ -539,6 +540,22 @@ export function buildCli() {
             }
             return `Syncing bookmarks...  ${lastSync.newAdded} new  \u2502  page ${lastSync.page}  \u2502  ${elapsed}s`;
           });
+          // Consent prompt for browser cookie extraction
+          if (!options.cookies?.length && !options.yes) {
+            const config = loadChromeSessionConfig({ browserId: options.browser ? String(options.browser) : undefined });
+            const browserName = config.browser.displayName;
+            const backend = config.browser.cookieBackend === 'firefox' ? 'Firefox' : 'Chrome-family';
+            console.log(`  \u26A0  This will read session cookies from ${browserName} (${backend}).\n`);
+            const consent = await promptText('  Proceed with cookie extraction? (y/N) ', { output: process.stdout });
+            if (consent.kind === 'interrupt') {
+              throw new PromptCancelledError('Cancelled.', 130);
+            }
+            if (consent.kind !== 'answer' || consent.value.toLowerCase() !== 'y') {
+              console.log('  Aborted. Use --cookies <ct0> <auth_token> to pass cookies directly.\n');
+              return;
+            }
+          }
+
           // Parse --cookies <ct0> [auth_token] — variadic, gives us an array
           let csrfToken: string | undefined;
           let cookieHeader: string | undefined;
@@ -548,6 +565,28 @@ export function buildCli() {
             const parts = [`ct0=${csrfToken}`];
             if (authToken) parts.push(`auth_token=${authToken}`);
             cookieHeader = parts.join('; ');
+          }
+
+          // Validate --chrome-user-data-dir exists and is a directory
+          if (options.chromeUserDataDir) {
+            const { existsSync, statSync } = await import('node:fs');
+            const customDir = String(options.chromeUserDataDir);
+            if (!existsSync(customDir)) {
+              console.error(`  Error: --chrome-user-data-dir path does not exist: ${customDir}`);
+              process.exitCode = 1;
+              return;
+            }
+            try {
+              if (!statSync(customDir).isDirectory()) {
+                console.error(`  Error: --chrome-user-data-dir is not a directory: ${customDir}`);
+                process.exitCode = 1;
+                return;
+              }
+            } catch {
+              console.error(`  Error: cannot access --chrome-user-data-dir: ${customDir}`);
+              process.exitCode = 1;
+              return;
+            }
           }
 
           // Load saved cursor for --continue mode
