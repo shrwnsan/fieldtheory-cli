@@ -33,9 +33,9 @@ export async function createDb(): Promise<Database> {
 
 export function saveDb(db: Database, filePath: string): void {
   const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const data = db.export();
   const tmp = filePath + '.tmp';
-  fs.writeFileSync(tmp, Buffer.from(data));
+  fs.writeFileSync(tmp, Buffer.from(data), { mode: 0o600 });
   fs.renameSync(tmp, filePath);
 }

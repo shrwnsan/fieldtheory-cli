@@ -167,7 +167,7 @@ export async function fetchBookmarkMediaBatch(
         const ext = sanitizeExtFromContentType(response.headers.get('content-type') ?? contentType ?? undefined, sourceUrl);
         const filename = `${bookmark.tweetId}-${digest}${ext}`;
         const localPath = path.join(mediaDir, filename);
-        await writeFile(localPath, buffer);
+        await writeFile(localPath, buffer, { mode: 0o600 });
 
         entries.push({
           bookmarkId: bookmark.id,

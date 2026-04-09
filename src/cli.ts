@@ -150,7 +150,7 @@ async function checkForUpdate(): Promise<void> {
 
       if (res.ok) {
         const data = await res.json() as any;
-        if (data?.version) fs.writeFileSync(cacheFile, data.version);
+        if (data?.version) fs.writeFileSync(cacheFile, data.version, { mode: 0o600 });
       }
     }
 
@@ -191,7 +191,7 @@ function showWhatsNew(): void {
   try { lastSeen = fs.readFileSync(versionFile, 'utf-8').trim(); } catch { /* first run */ }
 
   // Update the stored version
-  try { fs.writeFileSync(versionFile, version); } catch { /* read-only, etc */ }
+  try { fs.writeFileSync(versionFile, version, { mode: 0o600 }); } catch { /* read-only, etc */ }
 
   if (!lastSeen || lastSeen === version) return;
 
@@ -475,7 +475,7 @@ export function buildCli() {
               for (const f of result.failures) {
                 byReason[f.reason] = (byReason[f.reason] ?? 0) + 1;
               }
-              fs.writeFileSync(logPath, JSON.stringify({ failures: result.failures, summary: byReason }, null, 2));
+              fs.writeFileSync(logPath, JSON.stringify({ failures: result.failures, summary: byReason }, null, 2), { mode: 0o600 });
 
               console.log(`  ${result.failed} unavailable:`);
               for (const [reason, count] of Object.entries(byReason)) {
