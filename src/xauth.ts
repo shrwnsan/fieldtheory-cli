@@ -92,7 +92,7 @@ export async function loadTwitterOAuthToken(): Promise<XOAuthTokenSet | null> {
   return readJson<XOAuthTokenSet>(tokenPath);
 }
 
-export async function runTwitterOAuthFlow(): Promise<{ tokenPath: string; scope?: string }> {
+export async function runTwitterOAuthFlow(timeoutMs: number = 5 * 60 * 1000): Promise<{ tokenPath: string; scope?: string }> {
   const cfg = loadXApiConfig();
   if (!cfg.callbackUrl) {
     throw new Error('Missing X_CALLBACK_URL in .env.local');
@@ -104,6 +104,13 @@ export async function runTwitterOAuthFlow(): Promise<{ tokenPath: string; scope?
   const pathname = callback.pathname;
 
   const code = await new Promise<string>((resolve, reject) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      server.close();
+      controller.abort();
+      reject(new Error(`OAuth flow timed out after ${Math.round(timeoutMs / 1000)}s. Please try again.`));
+    }, timeoutMs);
+
     const server = http.createServer((req, res) => {
       try {
         const reqUrl = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
@@ -136,9 +143,11 @@ export async function runTwitterOAuthFlow(): Promise<{ tokenPath: string; scope?
         res.statusCode = 200;
         res.end('ft auth complete. You can close this tab.');
         server.close();
+        clearTimeout(timer);
         resolve(returnedCode);
       } catch (err) {
         server.close();
+        clearTimeout(timer);
         reject(err);
       }
     });
@@ -146,6 +155,7 @@ export async function runTwitterOAuthFlow(): Promise<{ tokenPath: string; scope?
     server.listen(port, '127.0.0.1', () => {
       console.log('Open this URL in your browser to authorize X bookmarks access:');
       console.log(url);
+      console.log(`(waiting up to ${Math.round(timeoutMs / 1000)}s for callback)\n`);
     });
   });
 
