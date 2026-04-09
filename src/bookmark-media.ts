@@ -5,6 +5,30 @@ import { ensureDir, pathExists, readJson, readJsonLines, writeJson } from './fs.
 import { bookmarkMediaDir, bookmarkMediaManifestPath, twitterBookmarksCachePath } from './paths.js';
 import type { BookmarkRecord } from './types.js';
 
+// ── SSRF protection ─────────────────────────────────────────────────────────
+
+const ALLOWED_MEDIA_HOSTS = new Set([
+  'pbs.twimg.com',
+  'video.twimg.com',
+  'twimg.com',
+  'abs.twimg.com',
+]);
+
+function validateMediaUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid media URL: ${url}`);
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error(`Rejected media URL with protocol ${parsed.protocol}: ${url}`);
+  }
+  if (!ALLOWED_MEDIA_HOSTS.has(parsed.hostname)) {
+    throw new Error(`Rejected media URL from untrusted host ${parsed.hostname}: ${url}`);
+  }
+}
+
 export interface MediaFetchEntry {
   bookmarkId: string;
   tweetId: string;
@@ -104,6 +128,8 @@ export async function fetchBookmarkMediaBatch(
       const fetchedAt = new Date().toISOString();
 
       try {
+        validateMediaUrl(sourceUrl);
+
         const head = await fetch(sourceUrl, { method: 'HEAD' });
         const contentLengthHeader = head.headers.get('content-length');
         const contentType = head.headers.get('content-type') ?? undefined;

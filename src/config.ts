@@ -14,8 +14,6 @@ export interface ChromeSessionConfig {
 export function loadEnv(): void {
   const dir = dataDir();
   const candidatePaths = [
-    path.join(process.cwd(), '.env.local'),
-    path.join(process.cwd(), '.env'),
     path.join(dir, '.env.local'),
     path.join(dir, '.env'),
   ];

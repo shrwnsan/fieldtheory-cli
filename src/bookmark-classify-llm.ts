@@ -30,10 +30,13 @@ interface LlmClassification {
 
 function sanitizeBookmarkText(text: string): string {
   return text
+    // Strip XML-like tags to prevent prompt injection via markup
+    .replace(/<\/?(?:system|user|assistant|prompt|instruction|tweet_text)[^>]*>/gi, '[filtered]')
+    // Block common prompt-injection phrases
     .replace(/ignore\s+(previous|above|all)\s+instructions?/gi, '[filtered]')
-    .replace(/you\s+are\s+now\s+/gi, '[filtered]')
-    .replace(/system\s*:\s*/gi, '[filtered]')
-    .replace(/<\/?tweet_text>/gi, '') // prevent tag escape
+    .replace(/you\s+are\+?\s*(?:now|a)\s+/gi, '[filtered]')
+    .replace(/(?:new|override)\s+(?:instructions?|system|prompt)/gi, '[filtered]')
+    .replace(/\[INST\]|<\|im_start\|>|<\|im_end\|>/g, '[filtered]')
     .slice(0, 300);
 }
 
