@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, unlinkSync, copyFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, copyFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir, platform } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -103,11 +103,11 @@ function queryFirefoxCookies(
     // Firefox may hold a WAL lock — copy the DB and query the copy
     const tmpDb = join(tmpdir(), `ft-ff-cookies-${randomUUID()}.db`);
     try {
-      copyFileSync(dbPath, tmpDb);
+      writeFileSync(tmpDb, readFileSync(dbPath), { mode: 0o600 });
       const walPath = dbPath + '-wal';
       const shmPath = dbPath + '-shm';
-      if (existsSync(walPath)) copyFileSync(walPath, tmpDb + '-wal');
-      if (existsSync(shmPath)) copyFileSync(shmPath, tmpDb + '-shm');
+      if (existsSync(walPath)) writeFileSync(tmpDb + '-wal', readFileSync(walPath), { mode: 0o600 });
+      if (existsSync(shmPath)) writeFileSync(tmpDb + '-shm', readFileSync(shmPath), { mode: 0o600 });
       output = tryQuery(tmpDb);
     } catch (e2: any) {
       throw new Error(
