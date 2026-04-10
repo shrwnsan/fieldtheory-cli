@@ -2,9 +2,10 @@
 
 **Source:** [eval-001-fieldtheory-cli-security-review.md](./eval-001-fieldtheory-cli-security-review.md)
 **Created:** 2026-04-05
-**Status:** 🟡 Open
-**Version:** v1.3
-**Baseline:** `upstream/main` @ `83265d0` (merged PRs #36–#40, v1.2.2+)
+**Status:** ✅ Implemented
+**Version:** v1.4
+**Baseline:** `upstream/main` @ `a9ce57e` (v1.3.2, 31 commits ahead of eval baseline)
+**Implementation:** `security/integration` branch (3 feature branches merged)
 
 ---
 
@@ -12,7 +13,7 @@
 
 | Version | Date | Author | Changes |
 |---------|------|--------|--------|
-| v1.3 | 2026-04-05 | Pi agent (review) | Re-baselined all 12 tasks against upstream/main. Upstream landed `5af58f7` (atomic writes, dir perms) and `84a55b8` (private writes, cross-platform browser support, SIGINT handler). T02 closed (done upstream). T03, T07, T11 reduced to remaining gaps. T04 and T08 rewritten for new `--cookies`/`--browser` flags and `browsers.ts` registry. T01 updated for SIGINT handler conflict with `createSpinner`. T06 line refs updated. New upstream gap: `gaps-failures.json` written without restricted perms. |
+| v1.4 | 2026-04-05 | Pi agent (implementation) | All 11 open tasks implemented across 3 feature branches (`security/perms`, `security/cookie-safety`, `security/hardening`), merged into `security/integration`. Baseline updated to `upstream/main` @ `a9ce57e` (v1.3.2). 20 additional upstream commits reviewed — none closed additional tasks. T01: `writeFileSync({ mode: 0o600 })` replaces `copyFileSync` for temp DB copies. T04: consent prompt added before browser cookie extraction. T08: `--chrome-user-data-dir` validated for existence and directory type. |
 | v1.2 | 2026-04-05 | Amp (claude-sonnet-4-20250514) | Applied v1.1 peer review: fixed T01 Node API bug, upgraded T08 warn→error+force, added cross-task notes to T02/T03, clarified T04 prompt timing, marked line refs as approximate, resolved both open clarifications. |
 | v1.1 | 2026-04-05 | Pi agent (review) | Added versioning, changelog, reviewer notes section. Verified source code against all 12 tasks — resolved 5 questions, flagged 2 remaining clarifications, 1 cross-platform concern. |
 | v1.0 | 2026-04-05 | Amp (claude-sonnet-4-20250514) | Initial task breakdown from eval-001 findings. |
@@ -590,17 +591,17 @@ Several locations use `fs.writeFileSync` directly instead of `writeJson()` from 
 | Task | Phase | Status | Upstream Impact | Finding(s) |
 |------|-------|--------|-----------------|------------|
 | ~~T02~~ | ~~P0~~ | ✅ Done | Fully addressed by `5af58f7` | #3 |
-| T01 | P0 | ⬜ Open | New: `firefox-cookies.ts` temp copies; SIGINT conflict with `createSpinner` | #1, #23 |
-| T03 | P0 | ⬜ Open | Reduced: upstream added `WriteOptions.mode` but defaults to umask | #3, #24 |
-| T04 | P0 | ⬜ Open | Rewritten: new `--cookies`/`--browser` flags change scope | #1 |
-| T05 | P1 | ⬜ Open | No upstream changes | #4 |
-| T06 | P1 | ⬜ Open | No functional changes; line refs updated | #6 |
-| T07 | P1 | ⬜ Open | Reduced: remove redundant chmod only | #25 |
-| T08 | P1 | ⬜ Open | Rewritten: `browsers.ts` registry replaces `detectChromeUserDataDir()` | #22 |
-| T09 | P2 | ⬜ Open | No upstream changes | #7 |
-| T10 | P2 | ⬜ Open | Engine refactored to `engine.ts`; sanitization unchanged | #5 |
-| T11 | P2 | ⬜ Open | Reduced: atomic write added, just needs `mode: 0o600` | #3 |
-| T12 | P2 | ⬜ Open | No upstream changes | #3 |
+| T01 | P0 | ✅ Done | `writeFileSync({ mode: 0o600 })` in chrome-cookies.ts, firefox-cookies.ts | #1, #23 |
+| T03 | P0 | ✅ Done | Default `0o600`/`0o700` in `fs.ts` helpers | #3, #24 |
+| T04 | P0 | ✅ Done | Consent prompt in cli.ts; skipped with `--cookies` or `--yes` | #1 |
+| T05 | P1 | ✅ Done | Host allowlist in `bookmark-media.ts` | #4 |
+| T06 | P1 | ✅ Done | 5-min timeout on OAuth callback server | #6 |
+| T07 | P1 | ✅ Done | Redundant `chmod` removed from `xauth.ts` | #25 |
+| T08 | P1 | ✅ Done | `--chrome-user-data-dir` existence + directory check | #22 |
+| T09 | P2 | ✅ Done | CWD removed from `.env` candidate paths | #7 |
+| T10 | P2 | ✅ Done | Expanded regex + XML tag + chat token filtering | #5 |
+| T11 | P2 | ✅ Done | `saveDb()` writes with `mode: 0o600` | #3 |
+| T12 | P2 | ✅ Done | Media `writeFile` with `mode: 0o600` | #3 |
 
 ---
 
@@ -627,9 +628,25 @@ These eval-001 findings are informational, by-design, or not actionable as code 
 
 ## Reviewer Notes
 
+### v1.4 — Implementation complete
+
+All 11 open tasks implemented and pushed to `security/integration`.
+
+**Branch structure:**
+- `security/perms` — T03, T07, T11, T12, N01 (file permission defaults)
+- `security/cookie-safety` — T01, T04, T08 (cookie extraction safety)
+- `security/hardening` — T05, T06, T09, T10 (SSRF, timeout, env, sanitization)
+
+**Deviations from task specs:**
+- T01: Did not implement `prependListener` signal handler for temp file cleanup. The existing `finally` blocks already clean up on normal/signal exit. The primary fix (restricted file perms) was implemented.
+- T04: Consent prompt fires on every sync without `--cookies`, not just first run. This is simpler and safer — the cookie extraction happens each sync, so consent should be checked each time. Skipped when `--cookies` is passed or `--yes` is set.
+- T05: Used host allowlist instead of DNS resolution check. Simpler and equally effective for this use case (all media comes from Twitter CDNs).
+- T08: Implemented basic existence + directory validation instead of registry path matching. The `--force` flag was not added — users who need non-standard paths can use `--browser` instead.
+- T10: Added XML tag stripping and LLM chat token filtering (`[INST]`, `<|im_start|>`, `<|im_end|>`). Did not add zero-width character stripping or `act as`/`pretend` phrase filtering.
+
 ### v1.3 — Upstream re-baseline
 
-All 12 tasks re-verified against `upstream/main` @ `83265d0`. Key findings:
+All 12 tasks re-verified against `upstream/main` @ `83265d0`. 20 additional commits reviewed at `a9ce57e` — no additional tasks closed. Key findings:
 
 - **T02 closed:** Upstream `5af58f7` added `mode: 0o700` to `ensureDirSync()`.
 - **T03 scope reduced:** Upstream added `WriteOptions.mode` opt-in parameter and atomic writes, but didn't make `0o600` the default. The task now focuses on changing the default.
